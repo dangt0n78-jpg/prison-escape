@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Prison Escape: Cellblock Cipher</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #111827;
+            color: #f3f4f6;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 500px;
+            box-shadow: 0 0 40px rgba(0,0,0,0.8);
+            border: 4px solid #374151;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        /* Lớp phủ màn hình để tạo cảm giác đang nhìn qua kính */
+        #lens-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.7) 100%);
+            pointer-events: none;
+        }
+
+        /* Bảng điều khiển góc xoay */
+        #ui-panel {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(31, 41, 55, 0.85);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #4b5563;
+            pointer-events: none;
+        }
+
+        .angle-text {
+            font-size: 28px;
+            font-weight: bold;
+            color: #38bdf8;
+            margin: 0;
+        }
+
+        /* Keypad nhập mã */
+        #keypad {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(31, 41, 55, 0.9);
+            padding: 15px;
+            border-radius: 8px;
+            border: 2px solid #4b5563;
+            text-align: center;
+        }
+        
+        #display-screen {
+            background: #064e3b;
+            color: #34d399;
+            font-size: 24px;
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            letter-spacing: 5px;
+            height: 30px;
+            line-height: 30px;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.5);
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 5px;
+        }
+
+        .btn-grid button {
+            background: #374151;
+            color: white;
+            border: 1px solid #4b5563;
+            padding: 10px 15px;
+            font-size: 18px;
+            font-family: inherit;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: 0.1s;
+        }
+
+        .btn-grid button:hover { background: #4b5563; }
+        .btn-grid button:active { background: #1f2937; }
+        
+        #btn-clear { grid-column: span 3; background: #7f1d1d; }
+        #btn-clear:hover { background: #991b1b; }
+
+        #instructions {
+            margin-top: 15px;
+            text-align: center;
+            color: #9ca3af;
+            line-height: 1.6;
+        }
+
+        kbd {
+            background: #374151;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #fff;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="800" height="500"></canvas>
+        <div id="lens-overlay"></div>
+
+        <div id="ui-panel">
+            <div style="font-size: 12px; color: #9ca3af; margin-bottom: 5px;">GÓC PHÂN CỰC CỦA KÍNH</div>
+            <div class="angle-text"><span id="angle-val">0</span>°</div>
+        </div>
+
+        <div id="keypad">
+            <div id="display-screen">____</div>
+            <div class="btn-grid">
+                <button onclick="pressKey(1)">1</button>
+                <button onclick="pressKey(2)">2</button>
+                <button onclick="pressKey(3)">3</button>
+                <button onclick="pressKey(4)">4</button>
+                <button onclick="pressKey(5)">5</button>
+                <button onclick="pressKey(6)">6</button>
+                <button onclick="pressKey(7)">7</button>
+                <button onclick="pressKey(8)">8</button>
+                <button onclick="pressKey(9)">9</button>
+                <button onclick="pressKey(0)" style="grid-column: 2;">0</button>
+                <button id="btn-clear" onclick="clearCode()">XÓA</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="instructions">
+        <b>THOÁT KHỎI PHÒNG GIAM</b><br>
+        Sử dụng <kbd>Con lăn chuột (Scroll)</kbd> hoặc <kbd>Mũi tên Trái / Phải</kbd> để xoay kính phân cực.<br>
+        Tìm các manh mối được dán bằng băng dính vô hình trên tường để giải mật mã 4 số!
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const angleValDisplay = document.getElementById('angle-val');
+        const displayScreen = document.getElementById('display-screen');
+
+        let currentAngle = 0; // Góc của kính từ 0 đến 180
+        let enteredCode = "";
+        const CORRECT_CODE = "4719"; 
+        let isWin = false;
+
+        // Dữ liệu các lớp băng dính chứa manh mối
+        // targetAngle: Góc phân cực mà băng dính sáng nhất
+        const clues = [
+            { x: 150, y: 150, w: 200, h: 60, targetAngle: 35, color: [239, 68, 68], text: "SỐ ĐẦU: 4" },      // Đỏ
+            { x: 450, y: 100, w: 200, h: 60, targetAngle: 80, color: [34, 197, 94], text: "SỐ THỨ 2: 7" },    // Xanh lá
+            { x: 100, y: 350, w: 220, h: 60, targetAngle: 125, color: [56, 189, 248], text: "SỐ CUỐI: 9" },     // Xanh dương
+            { x: 480, y: 380, w: 200, h: 60, targetAngle: 170, color: [217, 70, 239], text: "SỐ THỨ 3: 1" }     // Tím
+        ];
+
+        // Lắng nghe sự kiện xoay kính (Bàn phím)
+        window.addEventListener('keydown', (e) => {
+            if (isWin) return;
+            if (e.code === 'ArrowLeft') rotateLens(-2);
+            if (e.code === 'ArrowRight') rotateLens(2);
+        });
+
+        // Lắng nghe sự kiện xoay kính (Con lăn chuột)
+        canvas.addEventListener('wheel', (e) => {
+            if (isWin) return;
+            e.preventDefault(); // Chống cuộn trang
+            if (e.deltaY > 0) rotateLens(-3);
+            else rotateLens(3);
+        });
+
+        function rotateLens(amount) {
+            currentAngle += amount;
+            // Giới hạn góc trong khoảng 0-180 (vì tính chất đối xứng 180 độ của phân cực)
+            if (currentAngle >= 180) currentAngle -= 180;
+            if (currentAngle < 0) currentAngle += 180;
+            
+            angleValDisplay.innerText = Math.round(currentAngle);
+            render();
+        }
+
+        // Logic Keypad
+        function pressKey(num) {
+            if (isWin) return;
+            if (enteredCode.length < 4) {
+                enteredCode += num;
+                updateDisplay();
+                if (enteredCode.length === 4) {
+                    checkWin();
+                }
+            }
+        }
+
+        function clearCode() {
+            if (isWin) return;
+            enteredCode = "";
+            updateDisplay();
+            displayScreen.style.color = "#34d399";
+        }
+
+        function updateDisplay() {
+            let txt = enteredCode.padEnd(4, '_');
+            displayScreen.innerText = txt;
+        }
+
+        function checkWin() {
+            if (enteredCode === CORRECT_CODE) {
+                isWin = true;
+                displayScreen.style.color = "#a3e635";
+                displayScreen.innerText = "OPEN";
+                render();
+            } else {
+                displayScreen.style.color = "#ef4444"; // Báo sai mã đỏ lên
+                setTimeout(() => {
+                    clearCode();
+                }, 800);
+            }
+        }
+
+        // Hàm vẽ Background Tường gạch
+        function drawBrickWall() {
+            ctx.fillStyle = '#1e293b'; // Màu ximăng
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#334155'; // Màu gạch
+            const brickW = 80;
+            const brickH = 30;
+            const padding = 4;
+            
+            for (let y = 0; y < canvas.height; y += brickH + padding) {
+                let offset = (y / (brickH + padding)) % 2 === 0 ? 0 : brickW / 2;
+                for (let x = -offset; x < canvas.width; x += brickW + padding) {
+                    ctx.fillRect(x, y, brickW, brickH);
+                }
+            }
+
+            // Phủ một lớp bóng mờ dơ bẩn (Grunge)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Vẽ các mảnh băng dính manh mối
+        function drawClues() {
+            clues.forEach(clue => {
+                // Tính khoảng cách góc (Angle Difference)
+                // Cần xử lý wrap-around tại góc 180 độ.
+                let diff = Math.abs(currentAngle - clue.targetAngle);
+                if (diff > 90) {
+                    diff = 180 - diff;
+                }
+
+                // Nếu góc lệch > 30 độ, coi như không thấy màu (chỉ thấy băng dính trong suốt)
+                // Nếu góc lệch càng gần 0, opacity của màu (birefringence) càng cao
+                let intensity = Math.max(0, 1 - (diff / 25)); // Fade mượt từ 0-25 độ
+                
+                // Vẽ lớp nền băng dính trong suốt (lúc nào cũng hơi thấy mờ mờ)
+                ctx.save();
+                ctx.translate(clue.x, clue.y);
+                // Giả vờ xoay mảnh băng dính 1 chút cho tự nhiên
+                ctx.rotate((clue.targetAngle * 0.1) * Math.PI / 180); 
+
+                // Nền băng dính
+                ctx.fillStyle = `rgba(255, 255, 255, 0.05)`;
+                ctx.fillRect(0, 0, clue.w, clue.h);
+                
+                // Lớp màu phân cực kép (Sáng lên khi đúng góc)
+                if (intensity > 0) {
+                    // Nền màu
+                    ctx.fillStyle = `rgba(${clue.color[0]}, ${clue.color[1]}, ${clue.color[2]}, ${intensity * 0.4})`;
+                    ctx.fillRect(0, 0, clue.w, clue.h);
+                    
+                    // Text thông điệp
+                    ctx.fillStyle = `rgba(${clue.color[0]}, ${clue.color[1]}, ${clue.color[2]}, ${intensity})`;
+                    ctx.font = 'bold 24px Courier New';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(clue.text, clue.w / 2, clue.h / 2);
+                }
+
+                ctx.restore();
+            });
+        }
+
+        // Cập nhật Render
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            drawBrickWall();
+            drawClues();
+
+            // Hiệu ứng màu thay đổi nhẹ toàn màn hình dựa theo góc xoay (giả lập màng lọc quang học)
+            const globalTint = `rgba(0, ${currentAngle}, ${180 - currentAngle}, 0.1)`;
+            ctx.fillStyle = globalTint;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Màn hình chiến thắng
+            if (isWin) {
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                
+                ctx.fillStyle = '#4ade80';
+                ctx.font = 'bold 50px Courier New';
+                ctx.textAlign = 'center';
+                ctx.fillText('CỬA ĐÃ MỞ!', canvas.width/2 - 50, canvas.height/2);
+                ctx.font = '20px Courier New';
+                ctx.fillStyle = '#fff';
+                ctx.fillText('Bạn đã bẻ khóa thành công nhà tù quang học.', canvas.width/2 - 50, canvas.height/2 + 40);
+            }
+        }
+
+        // Khởi chạy
+        render();
+    </script>
+</body>
+</html>
